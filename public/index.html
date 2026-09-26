@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChordSync</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body data-theme="dark">
+
+<!-- ===== SIDEBAR ===== -->
+<aside id="sidebar" class="sidebar">
+  <div class="sidebar-header">
+    <span class="sidebar-title">Biblioteca</span>
+    <button class="btn-icon" id="btn-close-sidebar" title="Cerrar">✕</button>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-header">
+      <span>Canciones guardadas</span>
+      <button class="btn-icon btn-small" id="btn-new-song-lib" title="Nueva canción">+</button>
+    </div>
+    <ul id="library-list" class="library-list"></ul>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="sidebar-section-header">
+      <span>Setlists</span>
+      <button class="btn-icon btn-small" id="btn-new-setlist" title="Nuevo setlist">+</button>
+    </div>
+    <ul id="setlist-list" class="library-list"></ul>
+    <!-- Setlist song view (hidden until a setlist is clicked) -->
+    <div id="setlist-detail" class="setlist-detail" style="display:none">
+      <div class="setlist-detail-header">
+        <button class="btn-icon btn-small" id="btn-back-setlist">←</button>
+        <span id="setlist-detail-name" class="setlist-detail-title"></span>
+      </div>
+      <ul id="setlist-songs-list" class="library-list"></ul>
+    </div>
+  </div>
+</aside>
+
+<!-- ===== MAIN LAYOUT ===== -->
+<div id="app-layout">
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <button class="btn-icon" id="btn-toggle-sidebar" title="Biblioteca">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
+      <div class="logo">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+        </svg>
+        ChordSync
+      </div>
+    </div>
+
+    <div class="search-bar">
+      <input type="url" id="url-input" placeholder="Pega un link de YouTube…" autocomplete="off" spellcheck="false">
+      <button id="btn-analyze" class="btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        Analizar
+      </button>
+    </div>
+
+    <div class="header-right">
+      <button class="btn-icon" id="btn-theme" title="Cambiar tema">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== CONTENT ===== -->
+  <main id="content">
+
+    <!-- HOME VIEW -->
+    <section id="home-view" class="view active">
+      <div class="home-hero">
+        <div class="hero-icon">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+          </svg>
+        </div>
+        <h1>ChordSync</h1>
+        <p>Pega un link de YouTube para analizar la canción, obtener letra con acordes sincronizados y practicar con todas las herramientas de un músico.</p>
+        <div class="home-features">
+          <div class="feature-card">
+            <span class="feature-icon">🎵</span>
+            <strong>Análisis Musical</strong>
+            <small>Tonalidad, BPM, compás y estructura</small>
+          </div>
+          <div class="feature-card">
+            <span class="feature-icon">🎸</span>
+            <strong>Acordes + Letra</strong>
+            <small>Formato cifra con diagramas interactivos</small>
+          </div>
+          <div class="feature-card">
+            <span class="feature-icon">🎤</span>
+            <strong>Karaoke Sync</strong>
+            <small>Letra sincronizada con el audio</small>
+          </div>
+          <div class="feature-card">
+            <span class="feature-icon">🔧</span>
+            <strong>Herramientas</strong>
+            <small>Transposición, capo, metrónomo, loop</small>
+          </div>
+        </div>
+      </div>
+      <div id="recent-songs" class="recent-songs" style="display:none">
+        <h3>Canciones recientes</h3>
+        <div id="recent-list" class="recent-list"></div>
+      </div>
+    </section>
+
+    <!-- LOADING VIEW -->
+    <section id="loading-view" class="view">
+      <div class="loading-container">
+        <div class="loading-spinner"></div>
+        <div id="loading-status" class="loading-status">Analizando canción…</div>
+        <div class="loading-steps">
+          <div id="step-video" class="loading-step" data-label="Obteniendo información del video">⏳ Obteniendo información del video</div>
+          <div id="step-lyrics" class="loading-step" data-label="Buscando letra sincronizada">⏳ Buscando letra sincronizada</div>
+          <div id="step-chords" class="loading-step" data-label="Buscando acordes">⏳ Buscando acordes</div>
+          <div id="step-analysis" class="loading-step" data-label="Analizando estructura musical">⏳ Analizando estructura musical</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SONG VIEW -->
+    <section id="song-view" class="view">
+
+      <!-- Song Info Bar -->
+      <div class="song-info-bar">
+        <div class="song-meta">
+          <div class="song-title-area">
+            <h2 id="song-title">Título de la Canción</h2>
+            <span id="song-artist" class="song-artist">Artista</span>
+          </div>
+          <div class="song-tags">
+            <span class="tag tag-key" id="tag-key" title="Tonalidad — click para sugerencias de capo">🎵 C</span>
+            <span class="tag tag-bpm" id="tag-bpm" title="Tempo — click para tap tempo">♩ 120 BPM</span>
+            <span class="tag tag-time" id="tag-time" title="Compás">⏱ 4/4</span>
+            <span class="tag tag-capo" id="tag-capo" style="display:none" title="Capo">🔒 Capo 0</span>
+          </div>
+        </div>
+        <div class="song-actions">
+          <button class="btn-secondary btn-small" id="btn-save-song" title="Guardar en biblioteca">💾 Guardar</button>
+          <button class="btn-secondary btn-small" id="btn-add-setlist" title="Agregar a setlist">+ Setlist</button>
+          <button class="btn-secondary btn-small" id="btn-live-mode" title="Modo en vivo">🎭 En vivo</button>
+          <button class="btn-secondary btn-small" id="btn-export-pdf" title="Exportar PDF">📄 PDF</button>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="tool-group">
+          <label>Transponer</label>
+          <div class="btn-group">
+            <button class="btn-tool" id="btn-transpose-down" title="Bajar semitono">♭</button>
+            <span id="transpose-display" class="transpose-display">0</span>
+            <button class="btn-tool" id="btn-transpose-up" title="Subir semitono">♯</button>
+          </div>
+        </div>
+
+        <div class="tool-group">
+          <label>Capo</label>
+          <select id="capo-select" class="select-tool">
+            <option value="0">Sin capo</option>
+            <option value="1">Cejilla 1</option>
+            <option value="2">Cejilla 2</option>
+            <option value="3">Cejilla 3</option>
+            <option value="4">Cejilla 4</option>
+            <option value="5">Cejilla 5</option>
+            <option value="6">Cejilla 6</option>
+            <option value="7">Cejilla 7</option>
+          </select>
+        </div>
+
+        <div class="tool-group">
+          <label>Notación</label>
+          <select id="notation-select" class="select-tool">
+            <option value="american">Am (americana)</option>
+            <option value="latin">La m (latina)</option>
+            <option value="nashville">1m (Nashville)</option>
+          </select>
+        </div>
+
+        <div class="tool-group">
+          <label>Velocidad</label>
+          <select id="speed-select" class="select-tool">
+            <option value="0.25">×0.25</option>
+            <option value="0.5">×0.5</option>
+            <option value="0.75">×0.75</option>
+            <option value="1" selected>×1.0</option>
+            <option value="1.25">×1.25</option>
+            <option value="1.5">×1.5</option>
+          </select>
+        </div>
+
+        <div class="tool-group">
+          <label>Loop</label>
+          <div class="btn-group">
+            <button class="btn-tool" id="btn-loop-start" title="Marcar inicio de loop">⌈</button>
+            <button class="btn-tool" id="btn-loop-end" title="Marcar fin de loop">⌋</button>
+            <button class="btn-tool btn-toggle" id="btn-loop-toggle" title="Activar/desactivar loop">↺</button>
+          </div>
+        </div>
+
+        <div class="tool-group">
+          <label>Metrónomo</label>
+          <div class="btn-group">
+            <button class="btn-tool btn-toggle" id="btn-metronome" title="Activar metrónomo">🥁</button>
+            <input type="number" id="metronome-bpm" class="bpm-input" min="40" max="240" value="120" title="BPM">
+          </div>
+        </div>
+
+        <div class="tool-group">
+          <label>Sincronía</label>
+          <div class="btn-group">
+            <button class="btn-tool" id="btn-sync-minus" title="Retrasar letra">-0.5s</button>
+            <button class="btn-tool" id="btn-sync-plus" title="Adelantar letra">+0.5s</button>
+          </div>
+        </div>
+
+        <div class="tool-group">
+          <button class="btn-tool btn-toggle" id="btn-edit-mode" title="Editar canción">✏️ Editar</button>
+        </div>
+      </div>
+
+      <!-- Structure Bar -->
+      <div id="structure-bar" class="structure-bar"></div>
+
+      <!-- Main Content: Player + Chord Sheet + Chord Panel -->
+      <div class="song-content">
+
+        <!-- YouTube Player -->
+        <div class="player-section">
+          <div id="youtube-container" class="youtube-container">
+            <div id="youtube-player"></div>
+          </div>
+          <div class="player-controls">
+            <button class="btn-icon" id="btn-play-pause" title="Play/Pausa">
+              <svg id="icon-play" width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <polygon points="5,3 19,12 5,21"/>
+              </svg>
+              <svg id="icon-pause" width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+                <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+              </svg>
+            </button>
+            <span id="time-current" class="time-display">0:00</span>
+            <div class="progress-bar-container" id="progress-container">
+              <div class="progress-bar-bg">
+                <div id="progress-bar" class="progress-bar"></div>
+                <div id="loop-region" class="loop-region" style="display:none"></div>
+              </div>
+            </div>
+            <span id="time-total" class="time-display">0:00</span>
+            <button class="btn-icon" id="btn-volume" title="Volumen">🔊</button>
+            <input type="range" id="volume-slider" class="volume-slider" min="0" max="100" value="80">
+          </div>
+        </div>
+
+        <!-- Chord Sheet -->
+        <div class="chordsheet-section">
+          <div id="chordsheet-display" class="chordsheet"></div>
+          <div id="chordsheet-editor" class="chordsheet-editor" style="display:none">
+            <div class="editor-toolbar">
+              <span class="editor-hint">Formato: <code>[Am]letra [G]aquí</code>. Secciones: <code>VERSO</code>, <code>CORO</code></span>
+              <button class="btn-primary btn-small" id="btn-save-edit">Guardar</button>
+              <button class="btn-secondary btn-small" id="btn-cancel-edit">Cancelar</button>
+            </div>
+            <textarea id="chordsheet-textarea" class="chordsheet-textarea" spellcheck="false"></textarea>
+          </div>
+        </div>
+
+        <!-- Chord Diagram Panel (always visible) -->
+        <div class="chord-panel" id="chord-panel">
+          <div class="chord-panel-header">
+            <span class="chord-panel-name" id="chord-panel-name">—</span>
+            <div class="chord-panel-tabs">
+              <button class="cp-tab active" data-inst="guitar" title="Guitarra">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+              </button>
+              <button class="cp-tab" data-inst="piano" title="Piano">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="18" rx="2"/><line x1="8" y1="3" x2="8" y2="14"/><line x1="14" y1="3" x2="14" y2="14"/><line x1="20" y1="3" x2="20" y2="14"/></svg>
+              </button>
+              <button class="cp-tab" data-inst="bass" title="Bajo">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="chord-panel-body" id="chord-panel-diagram">
+            <p class="chord-panel-hint">Pasa el cursor<br>sobre un acorde</p>
+          </div>
+          <div class="chord-panel-footer">
+            <span class="chord-panel-label" id="chord-panel-inst-label">Guitarra</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ===== CHORD DIAGRAM MODAL (click for full view) ===== -->
+<div id="chord-modal" class="modal" style="display:none">
+  <div class="modal-overlay" id="chord-modal-overlay"></div>
+  <div class="modal-content chord-modal-content">
+    <div class="modal-header">
+      <h3 id="chord-modal-title">Acorde</h3>
+      <div class="chord-modal-tabs">
+        <button class="tab-btn active" data-tab="guitar">🎸 Guitarra</button>
+        <button class="tab-btn" data-tab="piano">🎹 Piano</button>
+        <button class="tab-btn" data-tab="bass">🎵 Bajo</button>
+      </div>
+      <button class="btn-icon modal-close" id="chord-modal-close">✕</button>
+    </div>
+    <div id="chord-diagram-container" class="chord-diagram-container"></div>
+  </div>
+</div>
+
+<!-- ===== SETLIST MODAL ===== -->
+<div id="setlist-modal" class="modal" style="display:none">
+  <div class="modal-overlay" id="setlist-modal-overlay"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Agregar a setlist</h3>
+      <button class="btn-icon modal-close" id="setlist-modal-close">✕</button>
+    </div>
+    <div id="setlist-modal-body" class="modal-body"></div>
+  </div>
+</div>
+
+<!-- ===== LIVE MODE OVERLAY ===== -->
+<div id="live-mode" class="live-mode" style="display:none">
+  <div class="live-header">
+    <div class="live-info">
+      <span id="live-title" class="live-title"></span>
+      <span id="live-artist" class="live-artist"></span>
+    </div>
+    <div class="live-controls">
+      <span id="live-key" class="live-tag">C</span>
+      <span id="live-bpm" class="live-tag">120 BPM</span>
+      <button class="btn-icon live-btn" id="btn-live-font-up" title="Texto más grande">A+</button>
+      <button class="btn-icon live-btn" id="btn-live-font-down" title="Texto más pequeño">A-</button>
+      <button class="btn-icon live-btn" id="btn-exit-live" title="Salir del modo en vivo">✕</button>
+    </div>
+  </div>
+  <div id="live-chordsheet" class="live-chordsheet"></div>
+  <div class="live-progress">
+    <div id="live-progress-bar" class="live-progress-fill"></div>
+  </div>
+</div>
+
+<!-- ===== TOAST ===== -->
+<div id="toast-container" class="toast-container"></div>
+
+<!-- ===== SCRIPTS ===== -->
+<script src="/js/chords.js"></script>
+<script src="/js/diagrams.js"></script>
+<script src="/js/editor.js"></script>
+<script src="/js/lyrics.js"></script>
+<script src="/js/sync.js"></script>
+<script src="/js/metronome.js"></script>
+<script src="/js/library.js"></script>
+<script src="/js/export.js"></script>
+<script src="/js/youtube.js"></script>
+<script src="/js/app.js"></script>
+
+</body>
+</html>
