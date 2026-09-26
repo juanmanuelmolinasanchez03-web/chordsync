@@ -1,0 +1,36 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/video-info"
+  to = "/.netlify/functions/video-info"
+  status = 200
+
+[[redirects]]
+  from = "/api/lyrics/multi"
+  to = "/.netlify/functions/lyrics-multi"
+  status = 200
+
+[[redirects]]
+  from = "/api/chords/search"
+  to = "/.netlify/functions/chords-search"
+  status = 200
+
+[[redirects]]
+  from = "/api/lyrics/search"
+  to = "/.netlify/functions/lyrics-search"
+  status = 200
+
+[[redirects]]
+  from = "/api/lyrics/synced"
+  to = "/.netlify/functions/lyrics-synced"
+  status = 200
+
+[[redirects]]
+  from = "/api/lyrics/plain"
+  to = "/.netlify/functions/lyrics-plain"
+  status = 200
