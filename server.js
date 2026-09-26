@@ -283,17 +283,106 @@ app.get('/api/lyrics/multi', async (req, res) => {
   }
 });
 
-// Multi-source chords (UG only for now - most reliable accessible source)
+// ── EXTRA CHORD SCRAPERS ──────────────────────────────────────────────────────
+
+function isChordLine2(line) {
+  const t = line.trim();
+  if (!t) return false;
+  const chordRe = /[A-G][#b]?(?:maj|min|aug|dim|sus|add|m)?[0-9]{0,2}(?:\/[A-G][#b]?)?/g;
+  const chords = (t.match(chordRe) || []);
+  if (!chords.length) return false;
+  const nonSpace = t.replace(/\s/g, '').length;
+  return chords.join('').length / nonSpace > 0.55;
+}
+
+function convertPlainTabToChordPro(text) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const result = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (isChordLine2(line)) {
+      const next = lines[i + 1];
+      if (next !== undefined && next.trim() && !isChordLine2(next)) {
+        result.push(mergeAboveLyric(line, next));
+        i++;
+      } else {
+        result.push(line);
+      }
+    } else {
+      result.push(line);
+    }
+  }
+  return result.join('\n');
+}
+
+async function eChords(artist, title) {
+  try {
+    const q  = `${artist} ${title}`.replace(/\s+/g, '+');
+    const sr = await http.get(`https://www.e-chords.com/search-all/${encodeURIComponent(q)}`);
+    const $  = cheerio.load(sr.data);
+    const href = $('ul#results li a').first().attr('href') || $('h1 a, .result a').first().attr('href');
+    if (!href) return null;
+    const page = await http.get(href.startsWith('http') ? href : `https://www.e-chords.com${href}`);
+    const $p = cheerio.load(page.data);
+    const pre = $p('pre#core').text() || $p('pre').first().text();
+    if (!pre || pre.length < 60) return null;
+    return { chordPro: convertPlainTabToChordPro(pre), url: href, source: 'E-Chords', artist, song: $p('h1').first().text().trim() || title };
+  } catch { return null; }
+}
+
+async function cifraClub(artist, title) {
+  try {
+    const q  = `${artist} ${title}`;
+    const sr = await http.get(`https://www.cifraclub.com.br/busca/?q=${encodeURIComponent(q)}&type=song`, { headers: { 'Accept-Language': 'pt-BR,pt;q=0.9' } });
+    const $  = cheerio.load(sr.data);
+    const href = $('a.art_img, ul.art-list a, .busca-item a').first().attr('href');
+    if (!href) return null;
+    const url  = href.startsWith('http') ? href : `https://www.cifraclub.com.br${href}`;
+    const page = await http.get(url, { headers: { 'Accept-Language': 'pt-BR,pt;q=0.9' } });
+    const $p   = cheerio.load(page.data);
+    const pre  = $p('pre').first().text() || $p('.cifra pre').text();
+    if (!pre || pre.length < 60) return null;
+    return { chordPro: convertPlainTabToChordPro(pre), url, source: 'CifraClub', artist, song: $p('h1').first().text().trim() || title };
+  } catch { return null; }
+}
+
+async function chordie(artist, title) {
+  try {
+    const q  = `${artist} ${title}`;
+    const sr = await http.get(`https://www.chordie.com/find.pe?searchwords=${encodeURIComponent(q)}&type=song`);
+    const $  = cheerio.load(sr.data);
+    const href = $('a[href*="/chord.pe"]').first().attr('href');
+    if (!href) return null;
+    const url  = href.startsWith('http') ? href : `https://www.chordie.com${href}`;
+    const page = await http.get(url);
+    const $p   = cheerio.load(page.data);
+    const pre  = $p('pre').first().text();
+    if (!pre || pre.length < 60) return null;
+    return { chordPro: convertPlainTabToChordPro(pre), url, source: 'Chordie', artist, song: $p('h1, h2').first().text().trim() || title };
+  } catch { return null; }
+}
+
+async function searchChords(artist, title) {
+  const [r1, r2, r3, r4] = await Promise.allSettled([
+    ultimateGuitar(artist, title).catch(() => null),
+    eChords(artist, title).catch(() => null),
+    cifraClub(artist, title).catch(() => null),
+    chordie(artist, title).catch(() => null),
+  ]);
+  const results = [r1, r2, r3, r4].map(r => r.status === 'fulfilled' ? r.value : null).filter(Boolean);
+  if (!results.length) return null;
+  return results.sort((a, b) => (b.chordPro?.length || 0) - (a.chordPro?.length || 0))[0];
+}
+
+// Multi-source chords (UG + E-Chords + CifraClub + Chordie in parallel)
 app.get('/api/chords/search', async (req, res) => {
   const { artist = '', title = '' } = req.query;
   if (!title) return res.status(400).json({ error: 'title required' });
 
   try {
-    const result = await cached(`chords:${artist}:${title}`, () =>
-      ultimateGuitar(artist, title).catch(() => null)
-    );
+    const result = await cached(`chords:${artist}:${title}`, () => searchChords(artist, title));
     if (result) return res.json(result);
-    res.status(404).json({ error: 'not found', tried: ['Ultimate Guitar'] });
+    res.status(404).json({ error: 'not found', tried: ['Ultimate Guitar', 'E-Chords', 'CifraClub', 'Chordie'] });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
