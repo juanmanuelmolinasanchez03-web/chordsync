@@ -34,3 +34,13 @@
   from = "/api/lyrics/plain"
   to = "/.netlify/functions/lyrics-plain"
   status = 200
+
+[[redirects]]
+  from = "/api/chords/results"
+  to = "/.netlify/functions/chords-results"
+  status = 200
+
+[[redirects]]
+  from = "/api/chords/fetch"
+  to = "/.netlify/functions/chords-fetch"
+  status = 200

@@ -41,6 +41,15 @@ window.App = (() => {
     },
   };
 
+  /* ---------- Helpers ---------- */
+  function escHtml(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function isYouTubeUrl(s) {
+    return /youtube\.com|youtu\.be/i.test(s);
+  }
+
   /* ---------- DOM Cache ---------- */
   const $ = id => document.getElementById(id);
   const els = {
@@ -126,6 +135,12 @@ window.App = (() => {
     chordPanelName:    $('chord-panel-name'),
     chordPanelDiagram: $('chord-panel-diagram'),
     chordPanelInstLabel: $('chord-panel-inst-label'),
+
+    // Search modal
+    searchModal:       $('search-modal'),
+    searchModalTitle:  $('search-modal-title'),
+    searchModalBody:   $('search-modal-body'),
+    searchModalClose:  $('search-modal-close'),
 
     // Chord modal
     chordModal:            $('chord-modal'),
@@ -279,6 +294,146 @@ window.App = (() => {
     }
   }
 
+  /* ---------- Search Flow (title search, no URL) ---------- */
+  async function searchByTitle(query) {
+    els.searchModalTitle.textContent = `Resultados para "${query}"`;
+    els.searchModalBody.innerHTML = '<p style="color:var(--text-muted);padding:8px 0">Buscando…</p>';
+    els.searchModal.style.display = 'flex';
+
+    try {
+      const res     = await fetch(`/api/chords/results?q=${encodeURIComponent(query)}`);
+      const results = res.ok ? await res.json() : [];
+
+      if (!results.length) {
+        els.searchModalBody.innerHTML = '<p style="color:var(--text-muted)">No se encontraron resultados. Prueba con el link de YouTube directamente.</p>';
+        return;
+      }
+
+      els.searchModalBody.innerHTML = results.map((r, i) => `
+        <button class="search-result-btn" data-index="${i}">
+          <div class="sr-info">
+            <span class="sr-title">${escHtml(r.title)}</span>
+            <span class="sr-artist">${escHtml(r.artist)}</span>
+          </div>
+          <div class="sr-meta">
+            <span class="sr-type">${escHtml(r.type)}</span>
+            ${r.rating ? `<span class="sr-rating">★ ${Number(r.rating).toFixed(1)}</span>` : ''}
+          </div>
+        </button>`).join('');
+
+      els.searchModalBody.querySelectorAll('.search-result-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const r = results[+btn.dataset.index];
+          els.searchModal.style.display = 'none';
+          analyzeFromSearchResult(r);
+        });
+      });
+    } catch {
+      els.searchModalBody.innerHTML = '<p style="color:var(--warm)">Error al buscar. Intenta de nuevo.</p>';
+    }
+  }
+
+  async function analyzeFromSearchResult(result) {
+    showView('loading');
+    resetLoadingSteps();
+
+    setLoadingStep('video', 'active');
+    // No video info for title searches — use result metadata
+    state.song.youtubeId  = null;
+    state.song.youtubeUrl = null;
+    state.song.title      = `${result.title} — ${result.artist}`;
+    state.song.artist     = result.artist;
+    setLoadingStep('video', 'done');
+
+    setLoadingStep('chords', 'active');
+    setLoadingStep('lyrics', 'active');
+
+    const [chordsRes, lyricsRes] = await Promise.allSettled([
+      fetch(`/api/chords/fetch?url=${encodeURIComponent(result.url)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/lyrics/multi?artist=${encodeURIComponent(result.artist)}&title=${encodeURIComponent(result.title)}`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]);
+
+    const chords = chordsRes.status === 'fulfilled' ? chordsRes.value : null;
+    const lyrics = lyricsRes.status === 'fulfilled' ? lyricsRes.value : null;
+
+    let chordPro = chords?.chordPro || '';
+    if (!chordPro && lyrics?.text) chordPro = Lyrics.plainToChordPro(lyrics.text);
+    state.song.chordPro = chordPro;
+
+    let syncedLines = [];
+    if (lyrics?.type === 'synced') {
+      syncedLines = Lyrics.parseLRC(lyrics.text);
+    }
+    state.song.syncedLines = syncedLines;
+
+    setLoadingStep('chords', chords?.chordPro ? 'done' : 'error');
+    setLoadingStep('lyrics', (chordPro || syncedLines.length) ? 'done' : 'error');
+
+    setLoadingStep('analysis', 'active');
+    if (chordPro) {
+      const detectedKey = Chords.estimateKey(Chords.extractChords(chordPro));
+      if (detectedKey) state.song.key = detectedKey;
+    }
+    state.song.bpm = 120;
+    state.song.timeSignature = '4/4';
+    setLoadingStep('analysis', 'done');
+
+    autoSaveSong();
+    applySongToUI();
+    showView('song');
+    initSync();
+    Library.addRecent(state.song);
+    refreshRecent();
+    refreshLibraryUI();
+  }
+
+  /* ---------- Estimated sync for plain lyrics ---------- */
+  function initSync() {
+    if (state.song.syncedLines.length > 0) {
+      const lyricLines = Editor.getLyricLines(state.song.chordPro);
+      const aligned    = Sync.alignPlainToSynced(lyricLines.join('\n'), state.song.syncedLines);
+      Sync.init(aligned, () => YT_Player.getCurrentTime(), (idx, lineData) => highlightLine(idx, lineData));
+    } else if (state.song.chordPro) {
+      // Estimated sync: divide video duration equally among lyric lines
+      // We wait until we have a duration, then build fake timestamps
+      startEstimatedSync();
+    }
+  }
+
+  let estimatedSyncTimer = null;
+
+  function startEstimatedSync() {
+    if (estimatedSyncTimer) clearInterval(estimatedSyncTimer);
+    let attempts = 0;
+    estimatedSyncTimer = setInterval(() => {
+      const duration = YT_Player.getDuration();
+      attempts++;
+      if (duration > 5 || attempts > 30) {
+        clearInterval(estimatedSyncTimer);
+        estimatedSyncTimer = null;
+        if (duration > 5) buildEstimatedSync(duration);
+      }
+    }, 500);
+  }
+
+  function buildEstimatedSync(duration) {
+    const lyricLines = Editor.getLyricLines(state.song.chordPro);
+    if (!lyricLines.length) return;
+    // Assume lyrics start at ~5% and end at ~90% of the song
+    const start    = duration * 0.05;
+    const end      = duration * 0.90;
+    const step     = (end - start) / lyricLines.length;
+    const synced   = lyricLines.map((text, i) => ({ time: start + i * step, text, lineIndex: i }));
+    Sync.init(synced, () => YT_Player.getCurrentTime(), (idx, lineData) => highlightLine(idx, lineData));
+    if (YT_Player.isPlaying()) Sync.start();
+  }
+
+  /* ---------- Auto-save song on analyze ---------- */
+  function autoSaveSong() {
+    if (!state.song.id) state.song.id = 'song_' + Date.now().toString(36);
+    Library.save({ ...state.song });
+  }
+
   /* ---------- Analyze Flow ---------- */
   async function analyze(url) {
     const videoId = YT_Player.extractVideoId(url);
@@ -305,39 +460,51 @@ window.App = (() => {
     state.song.artist     = artist;
     setLoadingStep('video', rawTitle ? 'done' : 'error');
 
-    // Steps 2+3: fetch lyrics AND chords in parallel
+    // Steps 2+3: fetch chords first, then lyrics with corrected artist/title
     setLoadingStep('lyrics', 'active');
     setLoadingStep('chords', 'active');
 
-    const fetched = await Lyrics.fetchAll(artist, song, msg => {
-      $('loading-status').textContent = msg;
-    });
+    // Fetch chords
+    const chordsRes = await fetch(`/api/chords/search?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(song)}`)
+      .then(r => r.ok ? r.json() : null).catch(() => null);
 
-    let chordPro = fetched.chordPro || '';
+    // Use UG's artist/title for lyrics if available (more accurate than video title)
+    const lyricsArtist = chordsRes?.artist || artist;
+    const lyricsTitle  = chordsRes?.song   || song;
+
+    const lyricsRes = await fetch(`/api/lyrics/multi?artist=${encodeURIComponent(lyricsArtist)}&title=${encodeURIComponent(lyricsTitle)}`)
+      .then(r => r.ok ? r.json() : null).catch(() => null);
+
+    let chordPro = chordsRes?.chordPro || '';
     const hasRealChords = chordPro.includes('[');
 
-    if (!hasRealChords && chordPro) {
-      chordPro = addEstimatedChords(chordPro, 'C');
+    // Build chord pro from lyrics if no chords found
+    if (!hasRealChords) {
+      if (lyricsRes?.text) {
+        const plain = lyricsRes.type === 'synced'
+          ? Lyrics.parseLRC(lyricsRes.text).map(l => l.text).join('\n')
+          : lyricsRes.text;
+        chordPro = Lyrics.plainToChordPro(plain);
+      }
+    }
+
+    // Get synced lines if available
+    let syncedLines = [];
+    if (lyricsRes?.type === 'synced') {
+      syncedLines = Lyrics.parseLRC(lyricsRes.text);
     }
 
     state.song.chordPro    = chordPro;
-    state.song.syncedLines = fetched.synced || [];
+    state.song.syncedLines = syncedLines;
+    if (chordsRes?.url) { state.song.chordsUrl = chordsRes.url; }
 
     setLoadingStep('chords', hasRealChords ? 'done' : 'error');
-    setLoadingStep('lyrics', (chordPro || fetched.synced?.length) ? 'done' : 'error');
-
-    if (fetched.chordsUrl) {
-      state.song.chordsUrl  = fetched.chordsUrl;
-      state.song.chordsFrom = fetched.source?.chords || '';
-    }
+    setLoadingStep('lyrics', (chordPro || syncedLines.length) ? 'done' : 'error');
 
     // Step 4: Musical analysis
     setLoadingStep('analysis', 'active');
-    const analysis = analyzeTitle(rawTitle, author);
-    state.song.key           = analysis.key;
-    state.song.bpm           = analysis.bpm;
-    state.song.timeSignature = analysis.timeSignature;
-
+    state.song.bpm           = 120;
+    state.song.timeSignature = '4/4';
     if (hasRealChords) {
       const detectedKey = Chords.estimateKey(Chords.extractChords(chordPro));
       if (detectedKey) state.song.key = detectedKey;
@@ -347,36 +514,27 @@ window.App = (() => {
     els.metronomeBpm.value = state.song.bpm;
 
     YT_Player.loadVideo(videoId);
+    autoSaveSong();
     applySongToUI();
     showView('song');
+    initSync();
 
-    // Init karaoke sync
-    if (state.song.syncedLines.length > 0) {
-      const lyricLines = Editor.getLyricLines(chordPro);
-      const aligned    = Sync.alignPlainToSynced(lyricLines.join('\n'), state.song.syncedLines);
-      Sync.init(
-        aligned,
-        () => YT_Player.getCurrentTime(),
-        (idx, lineData) => highlightLine(idx, lineData)
-      );
-    }
-
-    Library.addRecent({ id: state.song.id, title: state.song.title, artist: state.song.artist });
+    Library.addRecent(state.song);
     refreshRecent();
     refreshLibraryUI();
 
     const parts = [];
-    if (fetched.source?.chords) parts.push(`acordes: ${fetched.source.chords}`);
-    if (fetched.source?.lyrics) parts.push(`letra: ${fetched.source.lyrics}`);
+    if (chordsRes?.source) parts.push(`acordes: ${chordsRes.source}`);
+    if (lyricsRes?.source) parts.push(`letra: ${lyricsRes.source}`);
 
-    if (fetched.chordsUrl) {
+    if (chordsRes?.url) {
       const srcBadge = document.createElement('a');
       srcBadge.className = 'tag';
-      srcBadge.href = fetched.chordsUrl;
+      srcBadge.href = chordsRes.url;
       srcBadge.target = '_blank';
       srcBadge.rel = 'noopener';
       srcBadge.title = 'Ver en fuente original';
-      srcBadge.textContent = `🔗 ${fetched.source?.chords || 'Fuente'}`;
+      srcBadge.textContent = `🔗 ${chordsRes.source || 'Fuente'}`;
       srcBadge.style.marginLeft = '6px';
       els.songTags?.appendChild(srcBadge);
     }
@@ -696,15 +854,13 @@ window.App = (() => {
 
   function loadSongFromLibrary(id) {
     const song = Library.getById(id);
-    if (!song) return;
+    if (!song) { toast('Canción no encontrada en biblioteca', 'error'); return; }
     Object.assign(state.song, song);
     els.urlInput.value = song.youtubeUrl || '';
     if (song.youtubeId) YT_Player.loadVideo(song.youtubeId);
     applySongToUI();
     showView('song');
-    if (song.syncedLines?.length > 0) {
-      Sync.init(song.syncedLines, () => YT_Player.getCurrentTime(), (idx, lineData) => highlightLine(idx, lineData));
-    }
+    initSync();
     refreshLibraryUI();
     toast(`"${song.title}" cargada`, 'success');
   }
@@ -714,27 +870,34 @@ window.App = (() => {
     if (recent.length === 0) { els.recentSongs.style.display = 'none'; return; }
     els.recentSongs.style.display = '';
     els.recentList.innerHTML = recent.map(s => `
-      <div class="recent-card" data-id="${s.id}" data-url="${s.youtubeUrl || ''}">
+      <div class="recent-card" data-id="${s.id}">
         <div class="rc-title">${escHtml(s.title || 'Sin título')}</div>
         <div class="rc-artist">${escHtml(s.artist || '')}</div>
       </div>`).join('');
     els.recentList.querySelectorAll('.recent-card').forEach(card => {
-      card.addEventListener('click', () => {
-        if (card.dataset.id) loadSongFromLibrary(card.dataset.id);
-      });
+      card.addEventListener('click', () => loadSongFromLibrary(card.dataset.id));
     });
   }
 
   /* ---------- Events ---------- */
   function bindEvents() {
-    // Analyze
+    // Analyze or search
     els.btnAnalyze.addEventListener('click', () => {
-      const url = els.urlInput.value.trim();
-      if (url) analyze(url);
+      const val = els.urlInput.value.trim();
+      if (!val) return;
+      if (isYouTubeUrl(val) || YT_Player.extractVideoId(val)) {
+        analyze(val);
+      } else {
+        searchByTitle(val);
+      }
     });
     els.urlInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') els.btnAnalyze.click();
     });
+
+    // Search modal close
+    els.searchModalClose.addEventListener('click', () => { els.searchModal.style.display = 'none'; });
+    $('search-modal-overlay').addEventListener('click', () => { els.searchModal.style.display = 'none'; });
 
     // Sidebar
     els.btnToggleSidebar.addEventListener('click', () => {
@@ -1066,7 +1229,14 @@ window.App = (() => {
     YT_Player.on('onPlay', () => {
       els.iconPlay.style.display  = 'none';
       els.iconPause.style.display = '';
-      Sync.start();
+      // If sync has lines, start it; otherwise try building estimated sync now
+      if (Sync.syncedLines.length > 0) {
+        Sync.start();
+      } else if (state.song.chordPro) {
+        const dur = YT_Player.getDuration();
+        if (dur > 5) buildEstimatedSync(dur);
+        else startEstimatedSync();
+      }
       startPlayerPoll();
     });
     YT_Player.on('onPause', () => {
@@ -1079,11 +1249,6 @@ window.App = (() => {
       els.iconPause.style.display = 'none';
       Sync.stop();
     });
-  }
-
-  /* ---------- Helpers ---------- */
-  function escHtml(s) {
-    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
   /* ---------- Init ---------- */

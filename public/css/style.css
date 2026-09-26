@@ -1052,6 +1052,36 @@ button { cursor: pointer; border: none; background: none; font-family: inherit; 
 .chord-variant-btn:hover { border-color: var(--accent); }
 .chord-variant-btn.active { border-color: var(--chord-color); background: var(--highlight); }
 
+/* Search Results Modal */
+.search-modal-content { min-width: 440px; max-width: 600px; }
+
+.search-results-body { display: flex; flex-direction: column; gap: 6px; min-width: 380px; }
+
+.search-result-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  width: 100%;
+}
+
+.search-result-btn:hover { border-color: var(--accent); background: var(--bg-hover); }
+
+.sr-info { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.sr-title { font-size: 0.92rem; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sr-artist { font-size: 0.8rem; color: var(--text-muted); }
+
+.sr-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
+.sr-type { font-size: 0.72rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; }
+.sr-rating { font-size: 0.78rem; color: var(--section-color); }
+
 /* Setlist Modal */
 .setlist-pick-list { display: flex; flex-direction: column; gap: 8px; min-width: 280px; }
 

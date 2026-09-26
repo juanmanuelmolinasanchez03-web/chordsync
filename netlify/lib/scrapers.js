@@ -207,4 +207,60 @@ async function fetchLyricsMulti(artist, title) {
   return all.filter(r => r.type === 'plain').sort((a, b) => b.text.length - a.text.length)[0] || null;
 }
 
-module.exports = { http, ultimateGuitar, fetchLyricsMulti, lrcLibDirect, lrcLibSearch, lyricsOvh };
+// ── UG SEARCH (multiple results) ─────────────────────────────────────────────
+async function ugSearch(query) {
+  try {
+    const sr      = await http.get(`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(query)}`);
+    const $       = cheerio.load(sr.data);
+    const rawAttr = $('[class*="js-store"]').attr('data-content') || '';
+    if (!rawAttr) return [];
+
+    const json    = JSON.parse(rawAttr.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#039;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+    const results = json?.store?.page?.data?.results || [];
+
+    return results
+      .filter(r => (r.type === 'Chords' || r.type === 'Tab') && r.tab_url)
+      .slice(0, 8)
+      .map(r => ({
+        title:   r.song_name  || '',
+        artist:  r.artist_name || '',
+        type:    r.type,
+        rating:  r.rating,
+        votes:   r.votes,
+        url:     r.tab_url,
+      }));
+  } catch (e) {
+    console.error('[UG search]', e.message);
+    return [];
+  }
+}
+
+// ── UG FETCH ONE TAB ─────────────────────────────────────────────────────────
+async function ugFetch(tabUrl) {
+  try {
+    const tabPage = await http.get(tabUrl);
+    const $t      = cheerio.load(tabPage.data);
+    const rawTab  = $t('[class*="js-store"]').attr('data-content') || '';
+    if (!rawTab) return null;
+
+    const tabJson = JSON.parse(rawTab.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#039;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+    const content = tabJson?.store?.page?.data?.tab_view?.wiki_tab?.content || '';
+    const meta    = tabJson?.store?.page?.data?.tab || {};
+    if (!content || content.length < 40) return null;
+
+    return {
+      chordPro: parseUGFormat(content).trim(),
+      url:      tabUrl,
+      source:   'Ultimate Guitar',
+      artist:   meta.artist_name || '',
+      song:     meta.song_name   || '',
+      rating:   meta.rating,
+      votes:    meta.votes,
+    };
+  } catch (e) {
+    console.error('[UG fetch]', e.message);
+    return null;
+  }
+}
+
+module.exports = { http, ultimateGuitar, ugSearch, ugFetch, fetchLyricsMulti, lrcLibDirect, lrcLibSearch, lyricsOvh };

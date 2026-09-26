@@ -322,6 +322,41 @@ app.get('/api/lyrics/plain', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// UG search: returns multiple results for a query
+app.get('/api/chords/results', async (req, res) => {
+  const { q = '' } = req.query;
+  if (!q) return res.status(400).json({ error: 'q required' });
+  try {
+    const sr      = await http.get(`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(q)}`);
+    const $       = cheerio.load(sr.data);
+    const rawAttr = $('[class*="js-store"]').attr('data-content') || '';
+    if (!rawAttr) return res.json([]);
+    const json    = JSON.parse(rawAttr.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#039;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+    const results = (json?.store?.page?.data?.results || [])
+      .filter(r => (r.type === 'Chords' || r.type === 'Tab') && r.tab_url)
+      .slice(0, 8)
+      .map(r => ({ title: r.song_name||'', artist: r.artist_name||'', type: r.type, rating: r.rating, votes: r.votes, url: r.tab_url }));
+    res.json(results);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// UG fetch: fetch one specific tab by URL
+app.get('/api/chords/fetch', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'url required' });
+  try {
+    const tabPage = await http.get(url);
+    const $t      = cheerio.load(tabPage.data);
+    const rawTab  = $t('[class*="js-store"]').attr('data-content') || '';
+    if (!rawTab) return res.status(404).json({ error: 'not found' });
+    const tabJson = JSON.parse(rawTab.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&#039;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+    const content = tabJson?.store?.page?.data?.tab_view?.wiki_tab?.content || '';
+    const meta    = tabJson?.store?.page?.data?.tab || {};
+    if (!content || content.length < 40) return res.status(404).json({ error: 'empty' });
+    res.json({ chordPro: parseUGFormat(content).trim(), url, source: 'Ultimate Guitar', artist: meta.artist_name||'', song: meta.song_name||'' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/video-info', async (req, res) => {
   try {
     const r = await http.get(`https://www.youtube.com/oembed?url=${encodeURIComponent(req.query.url)}&format=json`);

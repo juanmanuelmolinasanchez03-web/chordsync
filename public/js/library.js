@@ -44,7 +44,7 @@ window.Library = (() => {
   }
 
   function getById(id) {
-    return getAll().find(s => s.id === id) || null;
+    return getAll().find(s => s.id === id) || getRecent().find(s => s.id === id) || null;
   }
 
   function search(query) {
@@ -59,7 +59,8 @@ window.Library = (() => {
 
   function addRecent(song) {
     const recent = getRecent().filter(s => s.id !== song.id);
-    recent.unshift({ id: song.id, title: song.title, artist: song.artist });
+    // Store full song so it can be fully restored without a separate library lookup
+    recent.unshift({ ...song });
     recent.splice(MAX_RECENT);
     localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
   }
